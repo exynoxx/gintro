@@ -3005,9 +3005,17 @@ proc writeEnum(info: GIEnumInfo) =
       output.writeLine("    ignoreThisDummyValue = 0") # Nim needs start with 0 for these low level sets
   else:
     output.writeLine("  ", tname & EM, " {.size: sizeof(cint), pure.} = enum")
+  # Nim compares identifiers ignoring underscores and, after the first
+  # character, case - so two distinct GIR members can mangle to a single Nim
+  # identifier. GDK_MEMORY_G8_B8R8_420 and GDK_MEMORY_G8_B8_R8_420 both give
+  # g8B8r8420. Suffix the later member of such a pair so the enum compiles.
+  var usedIdents: HashSet[string]
+  proc nimIdent(s: string): string =
+    if s.len == 0: "" else: s[0] & s[1 .. ^1].replace("_", "").toLowerAscii
+
   var k: T
   for j in 0 .. s.high:
-    let i = s[j]
+    var i = s[j]
     var val = i.v
     if flags and j == 0 and val == 0:
       # proc c(t: typedesc[B]): B ={}
@@ -3029,6 +3037,9 @@ proc writeEnum(info: GIEnumInfo) =
       continue
     if flags:
       val = countTrailingZeroBits(val) # firstSetBit(val)
+    while nimIdent(i.n) in usedIdents:
+      i.n.add('X')
+    usedIdents.incl nimIdent(i.n)
     output.writeLine("    ", i.n, " = ", val)
     k = i
 
