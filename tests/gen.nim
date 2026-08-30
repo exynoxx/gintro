@@ -2050,6 +2050,13 @@ proc writeMethod(info: GIBaseInfo; minfo: GIFunctionInfo) =
   if sym == "nice_agent_get_selected_pair": return #  was very wrong, fixed manually
   if sym == "g_hash_table_destroy": return
 
+  # GList, GSList and GNode each carry these, and they mangle to the same Nim
+  # proc with the same parameter list - "proc popAllocator*()" three times over,
+  # which is a redefinition error, not an overload. Keep the GList pair, which
+  # is generated first, and drop the other four. All six are no-ops in GLib
+  # since 2.10 and the allocator API was removed long ago.
+  if sym in ["g_slist_pop_allocator", "g_node_pop_allocator",
+             "g_slist_push_allocator", "g_node_push_allocator"]: return
 
   if sym == "g_variant_ref_sink": return # we need this early, so add manually early
 
