@@ -4,7 +4,7 @@ version       = "1.0.0"
 author        = "kevin"
 description   = "High level GObject-Introspection based GTK4/GTK3 bindings (revived, Nim 2.x compatible)"
 license       = "MIT"
-skipDirs      = @["examples", "tests"]
+skipDirs      = @["examples"] # tests/ holds gen.nim, which `prep` needs
 
 # Dependencies
 
