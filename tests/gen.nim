@@ -265,6 +265,11 @@ proc mysnakeToCamel(s: cstring): string =
     result = "QQQ"
     #assert(false)
 
+proc cName(s: string): string =
+  ## Nim quotes parameter names that are keywords, the generated C side temps do
+  ## not: parameter `end` is passed through as `end` but its temp is end_00.
+  s.strip(chars = {'`'})
+
 proc renumber(s: var string; i: int) = # only in use when WriteFields
   if s[^1].isDigit:
     s.insert($i, s.high)
@@ -1694,13 +1699,13 @@ proc writeMethod(info: GIBaseInfo; minfo: GIFunctionInfo) =
   template requireArrayLen(): untyped =
     ## The introspection data gives no length for the returned array, so a seq
     ## cannot be built. Emitting anyway produces "...ToSeq(resul0, .int)", which
-    ## is not valid Nim and takes the whole module down. Skip the proxy - the
-    ## low level importc proc is still generated, so nothing becomes
-    ## unreachable - and report it so it can be wrapped by hand if wanted.
+    ## is not valid Nim and takes the whole module down. Rewind to proxyStart,
+    ## which is taken after the low level importc proc, so that one is still
+    ## generated and nothing becomes unreachable, and report it so it can be
+    ## wrapped by hand if wanted.
     if pars.blex.len == 0:
       echo "Info: no length for the array returned by ", sym, " -- proxy skipped"
-      methodBuffer.cut(p)
-      processedFunctions.excl(sym)
+      methodBuffer.cut(proxyStart)
       return
 
   # new for v0.8.8
@@ -1949,18 +1954,18 @@ proc writeMethod(info: GIBaseInfo; minfo: GIFunctionInfo) =
         assert v[1].flags.contains(RecResFlag.array)
         methodBuffer.writeLine("  var $1x$2: array[$3, pointer]" % [StringArrayName, multi, $StringArrayEntries])
         methodBuffer.writeLine("  var $1$2: cstringArray = cast[cstringArray](addr $1x$2)" % [StringArrayName, multi])
-        methodBuffer.writeLine("  var $1_00 = seq2$2($3, $4$5)" % [k.strip(chars = {'`'}), v[0].replace("00").capitalizeAscii, k,
+        methodBuffer.writeLine("  var $1_00 = seq2$2($3, $4$5)" % [cName(k), v[0].replace("00").capitalizeAscii, k,
             StringArrayName, multi])
         if multi == "":
           multi = "1"
       elif v[1].flags.contains(RecResFlag.unamedA):
         assert v[1].flags.contains(RecResFlag.array)
-        methodBuffer.writeLine("  var $1_00: $2" % [k.strip(chars = {'`'}), v[1].name00])
+        methodBuffer.writeLine("  var $1_00: $2" % [cName(k), v[1].name00])
       else:
         if v[1].optOut:
-          methodBuffer.writeLine("  var $1_00: $2" % [k.strip(chars = {'`'}), v[0], k])
+          methodBuffer.writeLine("  var $1_00: $2" % [cName(k), v[0], k])
         else:
-          methodBuffer.writeLine("  var $1_00 = $2($3)" % [k.strip(chars = {'`'}), v[0], k])
+          methodBuffer.writeLine("  var $1_00 = $2($3)" % [cName(k), v[0], k])
 
   # assert(info != nil) # why can it be nil?
   # if Lib.len == 0: # xlib, fontconfig, freetype2 # but Lib is local to main(), so let it crash
@@ -2159,6 +2164,8 @@ proc writeMethod(info: GIBaseInfo; minfo: GIFunctionInfo) =
           if sym in ["g_object_ref_sink", "g_object_ref", "gtk_container_foreach"]:
             return
 
+        # from here on we only emit the proxy proc, requireArrayLen() rewinds to here
+        let proxyStart = methodBuffer.getPosition
         if b7:
           var isGObject = false
           let tag = gTypeInfoGetTag(ret2)
@@ -2393,9 +2400,9 @@ proc writeMethod(info: GIBaseInfo; minfo: GIFunctionInfo) =
               if gCallableInfoMayReturnNull(minfo):
                 methodBuffer.writeLine("  if resul0.isNil:")
                 methodBuffer.writeLine("    return")
-              methodBuffer.writeLine("  result = $1ToSeq(resul0, $2_00.int)" % [fixedName2(h.replace("00")).unCap, pars.blex])
+              methodBuffer.writeLine("  result = $1ToSeq(resul0, $2_00.int)" % [fixedName2(h.replace("00")).unCap, cName(pars.blex)])
             else:
-              methodBuffer.writeLine("  result = $1ToSeq($3, $2_00.int)" % [fixedName2(h.replace("00")).unCap, pars.blex, sym & pars.arglist])
+              methodBuffer.writeLine("  result = $1ToSeq($3, $2_00.int)" % [fixedName2(h.replace("00")).unCap, cName(pars.blex), sym & pars.arglist])
             assert(gCallableInfoGetCallerOwns(minfo) in {GITransfer.EVERYTHING, GITransfer.NOTHING})
             if gCallableInfoGetCallerOwns(minfo) == GITransfer.EVERYTHING:
               methodBuffer.writeLine("  cogfree(resul0)")
@@ -2462,17 +2469,17 @@ proc writeMethod(info: GIBaseInfo; minfo: GIFunctionInfo) =
               methodBuffer.writeLine("  $1.setLen($2)" % [k, pars.blex])
               # $1 is the Nim parameter and may need backticks (`end`, `type`,
               # `out`, ...); $2 is the plain name of the generated C-side var.
-              methodBuffer.writeLine("  copyMem(unsafeaddr $1[0], $2_00, $3.int * sizeof($1[0]))" % [k, k.strip(chars = {'`'}), pars.blex])
-              methodBuffer.writeLine("  cogfree($1_00)" % [k.strip(chars = {'`'})])
+              methodBuffer.writeLine("  copyMem(unsafeaddr $1[0], $2_00, $3.int * sizeof($1[0]))" % [k, cName(k), pars.blex])
+              methodBuffer.writeLine("  cogfree($1_00)" % [cName(k)])
             elif RecResFlag.namedA in v[1].flags:
               assert v[1].flags.contains(RecResFlag.array)
-              methodBuffer.writeLine("  $1 = $2($3_00, $4)" % [k, doCt3nt(v[0], v[1]), k.strip(chars = {'`'}), pars.blex])
+              methodBuffer.writeLine("  $1 = $2($3_00, $4)" % [k, doCt3nt(v[0], v[1]), cName(k), pars.blex])
             else:
               if v[1].optOut:
-                methodBuffer.writeLine("  if $1.addr != nil:" % [k, doCt3nt(v[0], v[1]), k.strip(chars = {'`'})])
-                methodBuffer.writeLine("    $1 = $2($3_00)" % [k, doCt3nt(v[0], v[1]), k.strip(chars = {'`'})])
+                methodBuffer.writeLine("  if $1.addr != nil:" % [k, doCt3nt(v[0], v[1]), cName(k)])
+                methodBuffer.writeLine("    $1 = $2($3_00)" % [k, doCt3nt(v[0], v[1]), cName(k)])
               else:
-                methodBuffer.writeLine("  $1 = $2($3_00)" % [k, doCt3nt(v[0], v[1]), k.strip(chars = {'`'})])
+                methodBuffer.writeLine("  $1 = $2($3_00)" % [k, doCt3nt(v[0], v[1]), cName(k)])
         # BLOCKMARK8
         else: # } end of large proxy block BLOCK7
           asym = fixedProcNames.getOrDefault(sym, asym)

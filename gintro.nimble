@@ -29,24 +29,8 @@ proc patchFile(path: string; replacements: openArray[(string, string)]) =
   writeFile(path, content)
 
 proc patchGeneratedBindings(gintroDir: string) =
-  # gtk4.nim: default flags value is already correct ({}) now that the size pragma
-  # is removed from set aliases — no patch needed here.
-
-  # Fix gobject.nim: g_param_spec_pool_free does not exist in GObject API;
-  # remove the call and leave self.impl = nil intact.
-  # gobject.nim is NOT patched here — we use the pre-patched repo version instead
-  # (see the copy loop below which skips gobject.nim from nim_gi/).
-  # The repo's gintro/gobject.nim already has: g_param_spec_pool_free removed,
-  # new(x, finalizerfree) → new(x), and the when-not-declared(IOCFlag) guard.
-
-  # cairo.nim: cairoimpl include is needed (provides lineTo, moveTo, save, etc.)
-  # On macOS it was disabled due to type duplication, but gen.nim now generates
-  # correct set[] types so cairoimpl includes cleanly on both platforms.
-
-  # Fix gst.nim: gen.nim doubles the default value for certain var-typed out
-  # parameters, producing malformed code like:
-  #   cast[var T](nil) = cast[var T = cast[var T](nil)](nil)
-  # Strip the spurious second assignment.
+  # Only gst.nim still needs post-processing; every other known mis-generation is
+  # fixed in gen.nim itself.
   patchFile(gintroDir / "gst.nim", [
     # gen.nim doubles the default value for certain var-typed out parameters
     ("cast[var gobject.Value](nil) = cast[var gobject.Value = cast[var gobject.Value](nil)](nil)",
@@ -78,24 +62,6 @@ proc patchGeneratedBindings(gintroDir: string) =
      "  if result != nil and result.impl == nil:",
      "  result.impl = cast[ptr Structure00](g_boxed_copy(gst_structure_get_type(), result.impl))\n" &
      "  if result != nil and result.impl == nil:")
-  ])
-
-  # Fix glib.nim: relax early forward-decl return types (ptr glib.List not yet defined).
-  # The generated proc spans two lines so we match only up to the pragma brace.
-  patchFile(gintroDir / "glib.nim", [
-    ("): ptr glib.List {.",
-     "): pointer {."),
-    ("proc g_markup_parse_context_get_element_stack(self: ptr MarkupParseContext00): ptr glib.SList",
-     "proc g_markup_parse_context_get_element_stack(self: ptr MarkupParseContext00): pointer"),
-    # Comment out duplicate allocator procs (node/slist variants clash with the list version)
-    ("proc popAllocator*() {.\n    importc: \"g_node_pop_allocator\", libprag.}",
-     "# proc popAllocator (g_node_pop_allocator) removed: duplicate"),
-    ("proc popAllocator*() {.\n    importc: \"g_slist_pop_allocator\", libprag.}",
-     "# proc popAllocator (g_slist_pop_allocator) removed: duplicate"),
-    ("proc pushAllocator*(allocator: Allocator) =\n  g_node_push_allocator(cast[ptr Allocator00](allocator.impl))",
-     "# proc pushAllocator (g_node) removed: duplicate"),
-    ("proc pushAllocator*(allocator: Allocator) =\n  g_slist_push_allocator(cast[ptr Allocator00](allocator.impl))",
-     "# proc pushAllocator (g_slist) removed: duplicate")
   ])
 
 proc prep =
@@ -155,7 +121,7 @@ proc prep =
   let mods = listFiles(td / wd / "nim_gi")
   for i in mods:
     let j = splitPath(i).tail
-    if j == "gobject.nim": continue # pre-patched in repo with when-not-declared(IOCFlag) guard
+    if j == "gobject.nim": continue
     if j == "gstapp.nim": continue # repo version has pullSample; Ubuntu typelib may not generate it
     cpFile(i, this / "gintro" / j)
 
