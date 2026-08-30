@@ -2728,7 +2728,9 @@ proc keymapKeyArrayToSeq(s: ptr KeymapKey; n: int):  seq[KeymapKey] =
 """ % [$StringArrayEntries]
 
 proc writeStruct(info: GIStructInfo) =
-  if gBaseInfoGetName(info) == "Matrix" and moduleNamespace == "cairo":
+  if gBaseInfoGetName(info) in ["Matrix", "Glyph", "TextCluster"] and moduleNamespace == "cairo":
+    # cairoimpl.nim, included at the end of cairo.nim, declares these with real
+    # fields; a second opaque declaration here is a redefinition error.
     return # https://discourse.gnome.org/t/gir-definition-of-cairo-matrix/15393
 
   if gBaseInfoGetName(info) in ["_ContextMenu", "_ContextMenuItem"]:
