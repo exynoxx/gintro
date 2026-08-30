@@ -1679,6 +1679,18 @@ proc writeMethod(info: GIBaseInfo; minfo: GIFunctionInfo) =
       methodBuffer.writeLine("    g_error_free(gerror[])")
       methodBuffer.writeLine("    raise newException(GException, msg)")
 
+  template requireArrayLen(): untyped =
+    ## The introspection data gives no length for the returned array, so a seq
+    ## cannot be built. Emitting anyway produces "...ToSeq(resul0, .int)", which
+    ## is not valid Nim and takes the whole module down. Skip the proxy - the
+    ## low level importc proc is still generated, so nothing becomes
+    ## unreachable - and report it so it can be wrapped by hand if wanted.
+    if pars.blex.len == 0:
+      echo "Info: no length for the array returned by ", sym, " -- proxy skipped"
+      methodBuffer.cut(p)
+      processedFunctions.excl(sym)
+      return
+
   # new for v0.8.8
   template dothegobjectargmagic(): untyped =
     if pars.outgobjectargisoptional:
@@ -2308,6 +2320,7 @@ proc writeMethod(info: GIBaseInfo; minfo: GIFunctionInfo) =
             # for fundamental types GITransfer.EVERYTHING and GITransfer.CONTAINER are equivalent
             var co = gCallableInfoGetCallerOwns(minfo)
             assert ngrRet.flags.contains(RecResFlag.array)
+            requireArrayLen()
             if gCallableInfoCanThrowGerror(minfo) or gCallableInfoMayReturnNull(minfo) or co in {GITransfer.EVERYTHING, CONTAINER}:
               methodBuffer.writeLine("  let resul0 = " & sym & pars.arglist)
               checkForGerror()
@@ -2351,6 +2364,7 @@ proc writeMethod(info: GIBaseInfo; minfo: GIFunctionInfo) =
               methodBuffer.writeLine("  cogfree(resul0)")
           elif RecResFlag.namedA in ngrRet.flags:
             assert ngrRet.flags.contains(RecResFlag.array)
+            requireArrayLen()
             let h = ngrRet.name00
             if gCallableInfoCanThrowGerror(minfo) or gCallableInfoMayReturnNull(minfo) or gCallableInfoGetCallerOwns(minfo) ==
                 GITransfer.EVERYTHING:
