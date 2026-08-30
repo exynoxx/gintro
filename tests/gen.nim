@@ -953,6 +953,12 @@ proc newGenRec(t: GITypeInfo; genProxy = false): RecRes =
     var rus = newGenRec(arrayType, genProxy = true)
     var child = rus.namePlain # [0]
     child = mangleType(mangleName(child))
+    # This branch returns early, so the name never passes through mangleType
+    # and the forward declaration guard never runs for it. Inside glib.nim
+    # itself the type may not be declared yet, and a proc returning
+    # "ptr glib.List" above its own type does not compile. Check it here; in
+    # every other module List is an imported symbol and this is a no-op.
+    discard mangleType("List")
     result[0] = "ptr glib.List"
     result[1] = glist
     result[2] = child
@@ -973,6 +979,12 @@ proc newGenRec(t: GITypeInfo; genProxy = false): RecRes =
     #var child = newGenRec(arrayType, genProxy = true).namePlain # [0]
     var child = rus.namePlain
     child = mangleType(mangleName(child))
+    # This branch returns early, so the name never passes through mangleType
+    # and the forward declaration guard never runs for it. Inside glib.nim
+    # itself the type may not be declared yet, and a proc returning
+    # "ptr glib.SList" above its own type does not compile. Check it here; in
+    # every other module SList is an imported symbol and this is a no-op.
+    discard mangleType("SList")
     result[0] = "ptr glib.SList"
     result[1] = gslist
     result[2] = child
@@ -2037,6 +2049,7 @@ proc writeMethod(info: GIBaseInfo; minfo: GIFunctionInfo) =
 
   if sym == "nice_agent_get_selected_pair": return #  was very wrong, fixed manually
   if sym == "g_hash_table_destroy": return
+
 
   if sym == "g_variant_ref_sink": return # we need this early, so add manually early
 
