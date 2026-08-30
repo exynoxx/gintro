@@ -2440,7 +2440,9 @@ proc writeMethod(info: GIBaseInfo; minfo: GIFunctionInfo) =
             if v[1].flags.contains(RecResFlag.unamedA):
               assert v[1].flags.contains(RecResFlag.array)
               methodBuffer.writeLine("  $1.setLen($2)" % [k, pars.blex])
-              methodBuffer.writeLine("  copyMem(unsafeaddr $1[0], $1_00, $2.int * sizeof($1[0]))" % [k.strip(chars = {'`'}), pars.blex])
+              # $1 is the Nim parameter and may need backticks (`end`, `type`,
+              # `out`, ...); $2 is the plain name of the generated C-side var.
+              methodBuffer.writeLine("  copyMem(unsafeaddr $1[0], $2_00, $3.int * sizeof($1[0]))" % [k, k.strip(chars = {'`'}), pars.blex])
               methodBuffer.writeLine("  cogfree($1_00)" % [k.strip(chars = {'`'})])
             elif RecResFlag.namedA in v[1].flags:
               assert v[1].flags.contains(RecResFlag.array)
