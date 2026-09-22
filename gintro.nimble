@@ -29,8 +29,6 @@ proc patchFile(path: string; replacements: openArray[(string, string)]) =
   writeFile(path, content)
 
 proc patchGeneratedBindings(gintroDir: string) =
-  # Only gst.nim still needs post-processing; every other known mis-generation is
-  # fixed in gen.nim itself.
   patchFile(gintroDir / "gst.nim", [
     # gen.nim doubles the default value for certain var-typed out parameters
     ("cast[var gobject.Value](nil) = cast[var gobject.Value = cast[var gobject.Value](nil)](nil)",

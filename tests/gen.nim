@@ -266,8 +266,7 @@ proc mysnakeToCamel(s: cstring): string =
     #assert(false)
 
 proc cName(s: string): string =
-  ## Nim quotes parameter names that are keywords, the generated C side temps do
-  ## not: parameter `end` is passed through as `end` but its temp is end_00.
+  ## `end` -> end, for the C side temps (end_00)
   s.strip(chars = {'`'})
 
 proc renumber(s: var string; i: int) = # only in use when WriteFields
@@ -958,12 +957,7 @@ proc newGenRec(t: GITypeInfo; genProxy = false): RecRes =
     var rus = newGenRec(arrayType, genProxy = true)
     var child = rus.namePlain # [0]
     child = mangleType(mangleName(child))
-    # This branch returns early, so the name never passes through mangleType
-    # and the forward declaration guard never runs for it. Inside glib.nim
-    # itself the type may not be declared yet, and a proc returning
-    # "ptr glib.List" above its own type does not compile. Check it here; in
-    # every other module List is an imported symbol and this is a no-op.
-    discard mangleType("List")
+    discard mangleType("List") # early return skips the forward declaration guard
     result[0] = "ptr glib.List"
     result[1] = glist
     result[2] = child
@@ -984,12 +978,7 @@ proc newGenRec(t: GITypeInfo; genProxy = false): RecRes =
     #var child = newGenRec(arrayType, genProxy = true).namePlain # [0]
     var child = rus.namePlain
     child = mangleType(mangleName(child))
-    # This branch returns early, so the name never passes through mangleType
-    # and the forward declaration guard never runs for it. Inside glib.nim
-    # itself the type may not be declared yet, and a proc returning
-    # "ptr glib.SList" above its own type does not compile. Check it here; in
-    # every other module SList is an imported symbol and this is a no-op.
-    discard mangleType("SList")
+    discard mangleType("SList") # early return skips the forward declaration guard
     result[0] = "ptr glib.SList"
     result[1] = gslist
     result[2] = child
@@ -1697,12 +1686,7 @@ proc writeMethod(info: GIBaseInfo; minfo: GIFunctionInfo) =
       methodBuffer.writeLine("    raise newException(GException, msg)")
 
   template requireArrayLen(): untyped =
-    ## The introspection data gives no length for the returned array, so a seq
-    ## cannot be built. Emitting anyway produces "...ToSeq(resul0, .int)", which
-    ## is not valid Nim and takes the whole module down. Rewind to proxyStart,
-    ## which is taken after the low level importc proc, so that one is still
-    ## generated and nothing becomes unreachable, and report it so it can be
-    ## wrapped by hand if wanted.
+    ## no array length in the typelib, so no seq proxy; the importc proc stays
     if pars.blex.len == 0:
       echo "Info: no length for the array returned by ", sym, " -- proxy skipped"
       methodBuffer.cut(proxyStart)
@@ -2055,11 +2039,7 @@ proc writeMethod(info: GIBaseInfo; minfo: GIFunctionInfo) =
   if sym == "nice_agent_get_selected_pair": return #  was very wrong, fixed manually
   if sym == "g_hash_table_destroy": return
 
-  # GList, GSList and GNode each carry these, and they mangle to the same Nim
-  # proc with the same parameter list - "proc popAllocator*()" three times over,
-  # which is a redefinition error, not an overload. Keep the GList pair, which
-  # is generated first, and drop the other four. All six are no-ops in GLib
-  # since 2.10 and the allocator API was removed long ago.
+  # these mangle to the same procs as GList's, a redefinition
   if sym in ["g_slist_pop_allocator", "g_node_pop_allocator",
              "g_slist_push_allocator", "g_node_push_allocator"]: return
 
@@ -2164,7 +2144,7 @@ proc writeMethod(info: GIBaseInfo; minfo: GIFunctionInfo) =
           if sym in ["g_object_ref_sink", "g_object_ref", "gtk_container_foreach"]:
             return
 
-        # from here on we only emit the proxy proc, requireArrayLen() rewinds to here
+        # requireArrayLen() rewinds to here
         let proxyStart = methodBuffer.getPosition
         if b7:
           var isGObject = false
@@ -2467,8 +2447,6 @@ proc writeMethod(info: GIBaseInfo; minfo: GIFunctionInfo) =
             if v[1].flags.contains(RecResFlag.unamedA):
               assert v[1].flags.contains(RecResFlag.array)
               methodBuffer.writeLine("  $1.setLen($2)" % [k, pars.blex])
-              # $1 is the Nim parameter and may need backticks (`end`, `type`,
-              # `out`, ...); $2 is the plain name of the generated C-side var.
               methodBuffer.writeLine("  copyMem(unsafeaddr $1[0], $2_00, $3.int * sizeof($1[0]))" % [k, cName(k), pars.blex])
               methodBuffer.writeLine("  cogfree($1_00)" % [cName(k)])
             elif RecResFlag.namedA in v[1].flags:
@@ -2756,9 +2734,8 @@ proc keymapKeyArrayToSeq(s: ptr KeymapKey; n: int):  seq[KeymapKey] =
 
 proc writeStruct(info: GIStructInfo) =
   if gBaseInfoGetName(info) in ["Matrix", "Glyph", "TextCluster"] and moduleNamespace == "cairo":
-    # cairoimpl.nim, included at the end of cairo.nim, declares these with real
-    # fields; a second opaque declaration here is a redefinition error.
-    return # https://discourse.gnome.org/t/gir-definition-of-cairo-matrix/15393
+    # cairoimpl.nim declares these, and Matrix: https://discourse.gnome.org/t/gir-definition-of-cairo-matrix/15393
+    return
 
   if gBaseInfoGetName(info) in ["_ContextMenu", "_ContextMenuItem"]:
     return # WebKit2WebExtension-4.0.gir bug
@@ -3032,10 +3009,7 @@ proc writeEnum(info: GIEnumInfo) =
       output.writeLine("    ignoreThisDummyValue = 0") # Nim needs start with 0 for these low level sets
   else:
     output.writeLine("  ", tname & EM, " {.size: sizeof(cint), pure.} = enum")
-  # Nim compares identifiers ignoring underscores and, after the first
-  # character, case - so two distinct GIR members can mangle to a single Nim
-  # identifier. GDK_MEMORY_G8_B8R8_420 and GDK_MEMORY_G8_B8_R8_420 both give
-  # g8B8r8420. Suffix the later member of such a pair so the enum compiles.
+  # Nim ignores _ and case after the first char, so GDK_MEMORY_G8_B8R8_420 and G8_B8_R8_420 collide
   var usedIdents: HashSet[string]
   proc nimIdent(s: string): string =
     if s.len == 0: "" else: s[0] & s[1 .. ^1].replace("_", "").toLowerAscii
